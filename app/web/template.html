@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf7ef">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161510">
+<meta name="description" content="Классный дайджест — бот, который превращает 100+ сообщений родительского чата в короткую сводку для учителя. Личные данные скрываются до отправки в ИИ.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='26' r='7' fill='%23f5a800'/%3E%3Cg stroke='%23f5a800' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M32 8v8M14 14l6 6M50 14l-6 6M10 28h9M54 28h-9M18 42l5-4M46 42l-5-4'/%3E%3C/g%3E%3Cpath d='M32 34c0 8-2 14-5 20' stroke='%232f9e44' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>Классный дайджест — сводка родительского чата за минуту</title>
+<style>
+  /* «Одуванчик»: тёплая бумага, мёд и зелень стебля, крупные тап-зоны */
+  :root{
+    --bg:#faf7ef;
+    --surface:#ffffff;
+    --surface-2:#f4efe2;
+    --ink:#211d12;
+    --muted:#7a7561;
+    --line:#eae3d0;
+    --accent:#f5a800;
+    --accent-2:#ffc53d;
+    --accent-deep:#c98a00;
+    --accent-ink:#33230a;
+    --accent-soft:#fff3d1;
+    --green:#2f9e44;
+    --green-soft:#e5f4e6;
+    --red:#d64541;
+    --red-soft:#fdecea;
+    --shadow:0 2px 6px rgba(96,78,20,.05), 0 12px 32px rgba(96,78,20,.07);
+    --radius:20px;
+    --glass:rgba(250,247,239,.86);
+    --seed:#e8d9a8;
+    /* Панель навигации: offset JS поднимает над интерфейсом браузера */
+    --tabbar-offset:0px;
+    --tabbar-h:66px;
+  }
+  [data-theme="dark"]{
+    --bg:#161510;
+    --surface:#211f17;
+    --surface-2:#2b291e;
+    --ink:#f3efe2;
+    --muted:#a49f8a;
+    --line:#37341f;
+    --accent:#ffb61e;
+    --accent-2:#ffcd5c;
+    --accent-deep:#f5a800;
+    --accent-ink:#2a1d04;
+    --accent-soft:#463a12;
+    --green:#6cc97d;
+    --green-soft:#1f3524;
+    --red:#ff8a80;
+    --red-soft:#3d2523;
+    --shadow:0 2px 6px rgba(0,0,0,.25), 0 14px 34px rgba(0,0,0,.35);
+    --glass:rgba(22,21,16,.86);
+    --seed:#4a4224;
+  }
+
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html{ -webkit-text-size-adjust:100%; overflow-x:hidden; overflow-x:clip; }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    background:var(--bg); color:var(--ink);
+    font-size:16px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; min-height:100dvh;
+    padding-bottom:calc(var(--tabbar-h) + var(--tabbar-offset) + env(safe-area-inset-bottom));
+  }
+  /* Мягкие пятна и летающие семена — фирменный фон */
+  .sky{ position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none; }
+  .sky::before{
+    content:""; position:absolute; top:-160px; right:-120px; width:480px; height:480px; border-radius:50%;
+    background:radial-gradient(circle, rgba(245,168,0,.16), rgba(245,168,0,0) 65%);
+  }
+  .sky::after{
+    content:""; position:absolute; bottom:-180px; left:-140px; width:520px; height:520px; border-radius:50%;
+    background:radial-gradient(circle, rgba(47,158,68,.10), rgba(47,158,68,0) 65%);
+  }
+  .sky i{ position:absolute; width:7px; height:7px; border-radius:50%; background:var(--seed); opacity:.5; }
+  .sky i:nth-child(1){ top:22%; left:8%;  animation:drift 26s ease-in-out infinite alternate; }
+  .sky i:nth-child(2){ top:56%; left:86%; animation:drift 32s ease-in-out infinite alternate-reverse; }
+  .sky i:nth-child(3){ top:78%; left:18%; animation:drift 38s ease-in-out infinite alternate; }
+  @keyframes drift{ from{ transform:translate(0,0) } to{ transform:translate(26px,-34px) } }
+
+  :focus-visible{ outline:3px solid var(--accent); outline-offset:2px; border-radius:10px; }
+
+  /* ---------- Каркас ---------- */
+  .shell{
+    flex:1 0 auto; max-width:560px; width:100%;
+    margin:0 auto; padding:0 18px calc(28px + env(safe-area-inset-bottom));
+  }
+
+  .appbar{
+    position:sticky; top:0; z-index:40;
+    display:flex; align-items:center; gap:10px;
+    margin:0; padding:10px 18px; padding-top:calc(10px + env(safe-area-inset-top));
+    background:var(--glass); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+  .brand svg{ width:34px; height:34px; flex:none; }
+  .brand .name{ font-size:17px; font-weight:800; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .brand .tag{ font-size:11.5px; color:var(--muted); font-weight:600; white-space:nowrap; }
+  .iconbtn{
+    flex:none; width:42px; height:42px; border-radius:14px; border:1px solid var(--line);
+    background:var(--surface); color:var(--ink); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .iconbtn svg{ width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .iconbtn .ico-sun{ display:none; }
+  [data-theme="dark"] .iconbtn .ico-sun{ display:block; }
+  [data-theme="dark"] .iconbtn .ico-moon{ display:none; }
+  .iconbtn:active{ transform:scale(.94); }
+
+  /* ---------- Экраны ---------- */
+  .screen{ display:none; padding-top:18px; }
+  .screen.active{ display:block; animation:rise .22s ease; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:none;} }
+
+  .h1{ font-size:28px; font-weight:850; letter-spacing:-.5px; line-height:1.15; margin:2px 0 6px; }
+  .sub{ color:var(--muted); font-size:15px; margin-bottom:18px; }
+
+  .pill{
+    display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:999px;
+    background:var(--green-soft); color:var(--green); font-size:13.5px; font-weight:700;
+  }
+  .pill.wait{ background:var(--accent-soft); color:var(--accent-deep); }
+  [data-theme="dark"] .pill.wait{ color:var(--accent-2); }
+  .pill::before{ content:""; width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+  /* ---------- Карточки ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:18px; margin-bottom:14px;
+  }
+  .card h3{ font-size:17px; font-weight:800; margin-bottom:6px; display:flex; align-items:center; gap:9px; }
+  .card h3 svg{ width:21px; height:21px; stroke:var(--accent-deep); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  [data-theme="dark"] .card h3 svg{ stroke:var(--accent-2); }
+  .card p{ color:var(--muted); font-size:14.5px; }
+  .card p + p{ margin-top:6px; }
+  /* Длинные слова и ссылки не должны растягивать страницу по горизонтали */
+  .card p, .cat li, .meta, .quote, .digest-raw, .stat span, .gstep, .pair .was, .pair .now{
+    overflow-wrap:anywhere;
+  }
+
+  /* ---------- Кнопки: большие тап-зоны ---------- */
+  .btn{
+    display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
+    min-height:58px; padding:16px 20px; border:none; border-radius:18px; cursor:pointer;
+    font-family:inherit; font-size:16.5px; font-weight:750; letter-spacing:-.1px;
+    transition:transform .08s ease, box-shadow .18s ease, background .15s ease;
+    text-decoration:none; text-align:center;
+  }
+  .btn:active{ transform:scale(.975); }
+  .btn[disabled]{ opacity:.55; pointer-events:none; }
+  .btn-primary{
+    background:linear-gradient(180deg, var(--accent-2), var(--accent)); color:var(--accent-ink);
+    box-shadow:0 8px 20px rgba(245,168,0,.35);
+  }
+  .btn-primary:active{ box-shadow:0 4px 10px rgba(245,168,0,.3); }
+  .btn-tonal{ background:var(--accent-soft); color:var(--accent-deep); }
+  [data-theme="dark"] .btn-tonal{ color:var(--accent-2); }
+  .btn-secondary{ background:var(--surface); color:var(--ink); border:1.5px solid var(--line); }
+  .btn-ghost{ background:transparent; color:var(--muted); min-height:50px; font-weight:650; }
+  .btn .spin{
+    display:none; width:18px; height:18px; border-radius:50%; flex:none;
+    border:2.5px solid rgba(0,0,0,.22); border-top-color:currentColor; animation:rot .7s linear infinite;
+  }
+  [data-theme="dark"] .btn .spin{ border-color:rgba(255,255,255,.25); }
+  .btn.loading .spin{ display:block; }
+  @keyframes rot{ to{ transform:rotate(360deg);} }
+
+  /* ---------- Счётчики ---------- */
+  .stats{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .stat{
+    background:var(--surface); border:1px solid var(--line); border-radius:18px;
+    padding:14px 16px; box-shadow:var(--shadow);
+  }
+  .stat b{ display:block; font-size:26px; font-weight:850; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+  .stat span{ color:var(--muted); font-size:12.5px; font-weight:600; }
+
+  /* ---------- Расписание: крупные чипы ---------- */
+  .sched{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
+  .chipbtn{
+    min-height:48px; border-radius:14px; border:1.5px solid var(--line); background:var(--surface-2);
+    color:var(--ink); font:inherit; font-size:15.5px; font-weight:700; cursor:pointer;
+    font-variant-numeric:tabular-nums;
+  }
+  .chipbtn:active{ transform:scale(.96); }
+  .chipbtn.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); box-shadow:0 4px 12px rgba(245,168,0,.35); }
+
+  /* ---------- Пары «До / После» в виде чат-пузырей ---------- */
+  .pair{ margin-bottom:12px; }
+  .pair .was,.pair .now{ padding:13px 16px; font-size:15px; overflow-wrap:anywhere; }
+  .pair .was{ background:var(--surface-2); border:1px solid var(--line); border-radius:18px 18px 18px 6px; }
+  .pair .now{ background:var(--green-soft); border-radius:18px 18px 6px 18px; margin-top:6px; }
+  .pair .lbl{
+    display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:800;
+    text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:5px;
+  }
+  .pair .was .lbl::before{ content:""; width:7px; height:7px; border-radius:50%; background:var(--red); }
+  .pair .now .lbl::before{ content:""; width:7px; height:7px; border-radius:50%; background:var(--green); }
+  .mark{ background:var(--accent); color:var(--accent-ink); border-radius:6px; padding:1px 6px; font-weight:700; white-space:nowrap; }
+  .hide{ background:var(--ink); color:var(--bg); border-radius:6px; padding:1px 6px; font-weight:700; white-space:nowrap; }
+
+  /* ---------- Чипы статистики ---------- */
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .chip{
+    padding:7px 13px; border-radius:999px; font-size:13.5px; font-weight:650;
+    background:var(--surface-2); color:var(--muted); border:1px solid var(--line);
+  }
+  .chip.good{ background:var(--green-soft); color:var(--green); border-color:transparent; }
+
+  /* ---------- Сводка по темам ---------- */
+  .cat{
+    border:1px solid var(--line); border-radius:16px; background:var(--surface);
+    padding:14px 16px; margin-top:10px; border-left:5px solid var(--muted);
+  }
+  .cat h4{ font-size:15.5px; font-weight:800; margin-bottom:7px; }
+  .cat ul{ list-style:none; }
+  .cat li{ padding:6px 0 6px 18px; position:relative; font-size:15px; }
+  .cat li::before{ content:""; position:absolute; left:2px; top:14px; width:7px; height:7px; border-radius:50%; background:currentColor; opacity:.4; }
+  .cat li.empty{ color:var(--muted); }
+  .cat li.empty::before{ display:none; }
+  .cat.q{ border-left-color:#2b7bbb; } .cat.q h4{ color:#2b7bbb; }
+  .cat.h{ border-left-color:#c94f6d; } .cat.h h4{ color:#c94f6d; }
+  .cat.m{ border-left-color:#c07f00; } .cat.m h4{ color:#c07f00; }
+  .cat.a{ border-left-color:#e4572e; } .cat.a h4{ color:#e4572e; }
+  [data-theme="dark"] .cat.q h4{ color:#6db3e8; }
+  [data-theme="dark"] .cat.h h4{ color:#eda0b5; }
+  [data-theme="dark"] .cat.m h4{ color:#eec27a; }
+  [data-theme="dark"] .cat.a h4{ color:#f49a78; }
+  .digest-raw{ white-space:pre-wrap; font-size:15px; }
+  .meta{ color:var(--muted); font-size:13px; margin-top:12px; }
+
+  /* ---------- Песочница ---------- */
+  textarea{
+    width:100%; min-height:120px; padding:15px; border-radius:16px; border:1.5px solid var(--line);
+    background:var(--surface-2); color:var(--ink); font:inherit; font-size:16px; resize:vertical;
+  }
+  textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+
+  .quote{
+    border-left:4px solid var(--accent); background:var(--surface-2);
+    border-radius:0 16px 16px 0; padding:13px 15px; font-size:14.5px;
+  }
+
+  /* ---------- Шаги-инструкция ---------- */
+  .gstep{
+    display:flex; gap:12px; align-items:flex-start; padding:12px 14px; margin:8px 0;
+    border-radius:14px; background:var(--surface-2); font-size:14.5px;
+  }
+  .gstep:first-child{ margin-top:0; } .gstep:last-child{ margin-bottom:0; }
+  .gstepnum{
+    flex:none; width:30px; height:30px; border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--accent); color:var(--accent-ink); font-weight:800; font-size:14.5px;
+  }
+  .gstep.key{ background:var(--accent-soft); }
+  .gstep.key .gstepnum{ font-size:15px; }
+
+  /* ---------- Пустые состояния ---------- */
+  .empty{
+    text-align:center; padding:26px 16px; color:var(--muted); font-size:14.5px;
+  }
+  .empty .big{ font-size:40px; display:block; margin-bottom:8px; }
+
+  .footer{ color:var(--muted); font-size:12.5px; text-align:center; padding:16px 8px 2px; }
+  .hidden{ display:none !important; }
+
+  /* ---------- Тост ---------- */
+  #toast{
+    position:fixed; left:50%; bottom:calc(var(--tabbar-offset) + var(--tabbar-h) + 10px); transform:translateX(-50%) translateY(16px); z-index:60;
+    background:var(--ink); color:var(--bg); padding:13px 22px; border-radius:16px;
+    font-size:14.5px; font-weight:650; opacity:0; pointer-events:none; transition:.25s ease;
+    max-width:88%; text-align:center;
+  }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ---------- Нижняя навигация: JS поднимает её над панелями браузера ---------- */
+  .tabbar{
+    position:fixed; left:var(--tabbar-x, 0px); right:auto; top:auto;
+    width:var(--tabbar-w, 100%); bottom:var(--tabbar-offset); z-index:50;
+    display:flex; background:var(--glass); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    border-top:1px solid var(--line);
+    padding-top:6px; padding-bottom:env(safe-area-inset-bottom);
+  }
+  [data-tabready] .tabbar{ transition: bottom .28s ease; }
+  [data-tabready] body{ transition: padding-bottom .28s ease; }
+  .tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; padding:9px 4px 8px;
+    background:none; border:none; cursor:pointer; color:var(--muted); font-family:inherit;
+  }
+  .tab svg{ width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+  .tab span{ font-size:10.5px; font-weight:700; letter-spacing:.1px; }
+  .tab.active{ color:var(--accent-deep); }
+  [data-theme="dark"] .tab.active{ color:var(--accent); }
+  .tab:active svg{ transform:scale(.9); }
+
+  /* ---------- Широкие экраны ---------- */
+  @media (min-width: 860px){
+    .shell{ max-width:640px; padding-top:26px; }
+    .appbar{ margin:0; border:1px solid var(--line); border-radius:22px; margin-top:18px; padding:12px 18px; }
+    .h1{ font-size:31px; }
+    .stats{ grid-template-columns:repeat(4,1fr); }
+    .tabbar{ padding:8px 12px; }
+    .tab{ flex-direction:row; gap:8px; padding:11px 18px; border-radius:999px; }
+    .tab.active{ background:var(--accent-soft); }
+    .tab span{ font-size:13.5px; }
+    .tab.active svg{ transform:none; }
+    #toast{ bottom:calc(var(--tabbar-offset) + var(--tabbar-h) + 14px); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<header class="appbar">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="25" r="6.5" fill="#f5a800"/><g stroke="#f5a800" stroke-width="3" stroke-linecap="round"><path d="M32 7v9M13 13l7 7M51 13l-7 7M9 27h10M55 27H45M17 41l6-4M47 41l-6-4"/></g><path d="M32 33c0 9-2 15-6 21" stroke="#2f9e44" stroke-width="3.5" fill="none" stroke-linecap="round"/></svg>
+    <div>
+      <div class="name">Классный дайджест</div>
+      <div class="tag">сводка родительского чата</div>
+    </div>
+  </div>
+  <button class="iconbtn" id="themeBtn" title="Сменить тему" aria-label="Сменить тему">
+    <svg class="ico-moon" viewBox="0 0 24 24"><path d="M20 13.5A8 8 0 1 1 10.5 4 6.5 6.5 0 0 0 20 13.5z"/></svg>
+    <svg class="ico-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  </button>
+</header>
+
+<div class="shell">
+<main>
+
+  <!-- главная -->
+  <section class="screen active" id="screen-home">
+    <div class="h1">Главное за минуту</div>
+    <div class="sub">Бот читает чат класса, прячет личные данные и собирает важное в короткую сводку.</div>
+
+    <span class="pill __PILL_CLASS__" id="botPill">__STATUS_LINE__</span>
+
+    <div style="height:14px;"></div>
+    <button class="btn btn-primary" id="homeDigestBtn">
+      <span class="spin"></span>Собрать сводку за день
+    </button>
+    <div style="height:10px;"></div>
+    <button class="btn btn-tonal" data-goto="demo">Показать демо для жюри</button>
+    <button class="btn btn-ghost" id="homeIcsBtn">Скачать события в календарь (.ics)</button>
+
+    <div class="stats">
+      <div class="stat"><b id="stChats">—</b><span id="stChatsLbl">чатов подключено</span></div>
+      <div class="stat"><b id="stMsgs">—</b><span>сообщений обработано</span></div>
+      <div class="stat"><b id="stMasked">—</b><span>данных скрыто</span></div>
+      <div class="stat"><b id="stSaved">—</b><span>минут сэкономлено</span></div>
+    </div>
+
+    <div class="card hidden" id="meBox"></div>
+
+    <div class="card hidden" id="guestBox">
+      <h3>Гостевой режим</h3>
+      <p>Это открытая страница. Счётчики общие для сервиса и не раскрывают данных учителей.</p>
+      <p>Личная панель открывается по кнопке «Веб-панель учителя» в меню бота — в ней появятся ваши чаты и расписание сводок.</p>
+    </div>
+
+    <button class="btn btn-ghost" id="connectBtn">Как подключить бота к классу</button>
+
+    <div class="footer">Команда «Весёлые одуванчики» · МБОУ СОШ №17, г. Тверь</div>
+  </section>
+
+  <!-- сводка -->
+  <section class="screen" id="screen-digest">
+    <div class="h1">Сводка за день</div>
+    <div class="sub">Важное из чата класса по четырём темам. Диагнозы и личные данные в сводку не попадают.</div>
+
+    <button class="btn btn-primary" id="digestBtn">
+      <span class="spin"></span>Собрать сводку сейчас
+    </button>
+
+    <div id="digestCard" class="hidden" style="margin-top:14px;"></div>
+
+    <button class="btn btn-ghost" id="digestIcsBtn">Выгрузить события в календарь (.ics)</button>
+  </section>
+
+  <!-- демо -->
+  <section class="screen" id="screen-demo">
+    <div class="h1">Демо для жюри</div>
+    <div class="sub">__DEMO_TITLE__ — 25 сообщений: поездка в Санкт-Петербург, справки, сборы денег и обычный шум родительского чата.</div>
+
+    <button class="btn btn-primary" id="demoBtn">
+      <span class="spin"></span>Загрузить демо-чат
+    </button>
+
+    <div id="demoResults" style="margin-top:14px;"></div>
+
+    <button class="btn btn-tonal hidden" id="demoDigestBtn" style="margin-top:2px;">
+      <span class="spin"></span>Собрать сводку из демо
+    </button>
+    <button class="btn btn-ghost" id="demoIcsBtn">Скачать календарь событий (.ics)</button>
+  </section>
+
+  <!-- защита -->
+  <section class="screen" id="screen-privacy">
+    <div class="h1">Проверка защиты</div>
+    <div class="sub">Вставьте любое сообщение из чата — покажем, что именно увидит нейросеть. Имена станут маркерами с инициалами, остальное скроется полностью.</div>
+
+    <textarea id="sandboxText">Мария Иванова, у нас простуда, температура 39! Звоните +7 900 123-45-67, карта 4276 5500 1234 5678, почта mama@yandex.ru</textarea>
+
+    <div style="height:12px;"></div>
+    <button class="btn btn-primary" id="anonBtn">
+      <span class="spin"></span>Проверить маскирование
+    </button>
+
+    <div id="anonResults"></div>
+  </section>
+
+  <!-- инфо -->
+  <section class="screen" id="screen-info">
+    <div class="h1">Как это работает</div>
+    <div class="sub">Подключение занимает две минуты, дальше сводка приходит сама.</div>
+
+    <div class="card">
+      <h3>Подключение за 4 шага</h3>
+      <div class="gstep"><div class="gstepnum">1</div><div>
+        Откройте чат класса и в меню группы нажмите <b>«Добавить участника»</b>.
+      </div></div>
+      <div class="gstep"><div class="gstepnum">2</div><div>
+        Найдите бота <b>«96_Идея_фикс»</b> в списке или через поиск и нажмите <b>«Добавить в чат»</b>.
+      </div></div>
+      <div class="gstep"><div class="gstepnum">3</div><div>
+        В плашке <b>«Показать историю чата новым участникам?»</b> выберите <b>«Показать»</b>.
+      </div></div>
+      <div class="gstep key"><div class="gstepnum">4</div><div>
+        Бот пришлёт продолжение: в меню группы — <b>«Администраторы»</b> →
+        <b>«Добавить администратора»</b>, выберите бота, уберите лишние
+        разрешения (право <b>«Читать сообщения»</b> должно быть включено)
+        и нажмите <b>«Назначить администратором»</b>. MAX может держать
+        часть прав включёнными принудительно — это нормально.
+        Оставьте включённым и право <b>«Удалять сообщения»</b> — тогда бот сам
+        уберёт из чата свои служебные подсказки и ответы на команды.
+      </div></div>
+      <p style="margin-top:10px;">Без права администратора MAX не показывает боту сообщения — это ограничение платформы.</p>
+    </div>
+
+    <div class="card">
+      <h3>Что бот пишет родителям</h3>
+      <div class="quote">__WELCOME_TEXT__</div>
+      <p style="margin-top:10px;">Это сообщение бот сам отправляет в чат класса при подключении — родители сразу знают, что их данные защищены.</p>
+    </div>
+
+    <div class="card">
+      <h3>Почему это безопасно</h3>
+      <p>Телефоны, карты, паспорта и СНИЛС прячутся до записи в базу. Имена заменяются маркерами с инициалами, и только в готовой сводке учитель видит их снова. Диагнозы в сводку не попадают — вместо них «отсутствует по болезни».</p>
+      <p>Храним только обезличенный текст и не дольше суток: после выдачи сводки буфер очищается.</p>
+    </div>
+
+    <div class="card">
+      <h3>О проекте</h3>
+      <p>Команда «Весёлые одуванчики», МБОУ СОШ №17, г. Тверь. Направление «Арсенал мастера» хакатона «Идея фикс».</p>
+      <p>Бот в MAX: <a href="https://max.ru/ideya_fiks_96_bot" style="color:var(--accent-deep); font-weight:700;">@ideya_fiks_96_bot</a></p>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<nav class="tabbar">
+  <button class="tab active" data-tab="home">
+    <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+    <span>Главная</span>
+  </button>
+  <button class="tab" data-tab="digest">
+    <svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h7M9 14h7M9 18h4"/></svg>
+    <span>Сводка</span>
+  </button>
+  <button class="tab" data-tab="demo">
+    <svg viewBox="0 0 24 24"><path d="M10 3h4v6l5 9a2 2 0 0 1-2 3H7a2 2 0 0 1-2-3l5-9z"/><path d="M8 15h8"/></svg>
+    <span>Демо</span>
+  </button>
+  <button class="tab" data-tab="privacy">
+    <svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+    <span>Защита</span>
+  </button>
+  <button class="tab" data-tab="info">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+    <span>Инфо</span>
+  </button>
+</nav>
+
+<div id="toast" role="status"></div>
+
+<script>
+(function(){
+  "use strict";
+  var STATUS_ON  = __STATUS_ON__;
+  var STATUS_OFF = __STATUS_OFF__;
+
+  /* ---------- Тема: по времени суток + ручной переключатель ---------- */
+  var root = document.documentElement, themeBtn = document.getElementById("themeBtn");
+  var saved = null;
+  try{ saved = localStorage.getItem("theme"); }catch(e){}
+  function applyTheme(t){
+    root.setAttribute("data-theme", t);
+  }
+  function autoTheme(){
+    var h = new Date().getHours();
+    return (h >= 7 && h < 21) ? "light" : "dark";
+  }
+  var theme = (saved === "dark" || saved === "light") ? saved : autoTheme();
+  applyTheme(theme);
+  themeBtn.addEventListener("click", function(){
+    theme = (root.getAttribute("data-theme") === "dark") ? "light" : "dark";
+    try{ localStorage.setItem("theme", theme); }catch(e){}
+    applyTheme(theme);
+  });
+
+  /* ---------- Панель навигации: панели браузера прыгают при скролле, поэтому меряем с паузой ---------- */
+  var tabbar = document.querySelector(".tabbar");
+  var vv = window.visualViewport;
+  var lastOffset = null, settleTimer = null;
+  function measureOverlap(){
+    if(!vv) return 0;
+    /* при pinch-зуме vv.height меньше окна из-за масштаба — вертикаль не трогаем */
+    if(vv.height < window.innerHeight - 2){
+      return lastOffset == null ? 0 : lastOffset;
+    }
+    var hidden = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+    if(hidden < 0) hidden = 0;
+    if(hidden > 160) hidden = 160;
+    return hidden;
+  }
+  /* горизонталь подгоняем всегда: при pinch-зуме панель держим в видимой зоне */
+  function applyViewportBox(){
+    if(!vv) return;
+    root.style.setProperty("--tabbar-x", Math.max(0, Math.round(vv.offsetLeft)) + "px");
+    root.style.setProperty("--tabbar-w", Math.round(vv.width) + "px");
+  }
+  function applyOffset(value, force){
+    if(lastOffset !== null && !force && Math.abs(value - lastOffset) < 28) return;
+    lastOffset = value;
+    root.style.setProperty("--tabbar-offset", value + "px");
+    root.style.setProperty("--tabbar-h", tabbar.offsetHeight + "px");
+    /* Переход включаем только после первой установки — без слайда при загрузке. */
+    requestAnimationFrame(function(){ root.setAttribute("data-tabready", ""); });
+  }
+  function syncTabbar(force){
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(function(){
+      applyViewportBox();
+      applyOffset(measureOverlap(), force);
+    }, 160);
+  }
+  if(vv){
+    vv.addEventListener("resize", function(){ syncTabbar(false); });
+    vv.addEventListener("scroll", function(){ syncTabbar(false); });
+  }
+  window.addEventListener("resize", function(){ syncTabbar(false); });
+  window.addEventListener("orientationchange", function(){ syncTabbar(true); });
+  applyViewportBox();
+  applyOffset(measureOverlap(), true);
+
+  /* ---------- Вкладки ---------- */
+  var tabs = document.querySelectorAll(".tab");
+  tabs.forEach(function(t){
+    t.addEventListener("click", function(){ goto(t.dataset.tab); });
+  });
+  document.querySelectorAll("[data-goto]").forEach(function(b){
+    b.addEventListener("click", function(){ goto(b.dataset.goto); });
+  });
+  function goto(name){
+    tabs.forEach(function(t){ t.classList.toggle("active", t.dataset.tab === name); });
+    document.querySelectorAll(".screen").forEach(function(s){
+      s.classList.toggle("active", s.id === "screen-" + name);
+    });
+    window.scrollTo({top:0, behavior:"smooth"});
+  }
+
+  /* ---------- Утилиты ---------- */
+  function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
+    return "&#" + c.charCodeAt(0) + ";"; }); }
+  function toast(msg){
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove("show"); }, 2600);
+  }
+  function withKey(url){
+    var k = new URLSearchParams(location.search).get("k") || "";
+    return url + (url.indexOf("?") >= 0 ? "&" : "?") + "k=" + encodeURIComponent(k);
+  }
+  function busy(b, on){ b.classList.toggle("loading", on); b.disabled = on; }
+  function api(url, opts){
+    return fetch(withKey(url), opts).then(function(r){
+      if(r.status === 401) throw new Error("Раздел доступен по личной кнопке «Веб-панель учителя» в меню бота");
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      if(d && d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function openIcs(){ window.open("/export.ics" + location.search, "_blank"); }
+  ["homeIcsBtn", "digestIcsBtn", "demoIcsBtn"].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.addEventListener("click", openIcs);
+  });
+
+  function highlightMasked(text){
+    var out = esc(text);
+    out = out.replace(/\[(PER|USR)_\d+[^\]]*\]/g, '<span class="mark">$&</span>');
+    out = out.replace(/\[[^\]]*СКРЫТ[^\]]*\]/g, '<span class="hide">$&</span>');
+    return out;
+  }
+
+  /* ---------- Сводка: текст -> карточки категорий ---------- */
+  var CATS = [
+    { key:"q", test:"Вопросы к учителю" },
+    { key:"h", test:"Отсутствующие" },
+    { key:"m", test:"Договорённости" },
+    { key:"m", test:"Сборы" },
+    { key:"a", test:"Требует действия" }
+  ];
+  function catKey(line){
+    for(var i = 0; i < CATS.length; i++){
+      if(line.indexOf(CATS[i].test) >= 0) return CATS[i].key;
+    }
+    return null;
+  }
+  function renderDigest(container, d){
+    var text = String(d.text || "");
+    var lines = text.split("\n");
+    var title = "Дайджест";
+    var footer = "";
+    var cats = [];
+    var current = null;
+    lines.forEach(function(raw){
+      var line = raw.trim();
+      if(!line) return;
+      if(line.indexOf("📋") === 0){ title = line.replace(/^📋\s*/, ""); return; }
+      if(line.indexOf("🧮") === 0){ footer = line.replace(/^🧮\s*/, ""); return; }
+      var key = catKey(line);
+      if(key){
+        current = { key:key, head:line, items:[] };
+        cats.push(current);
+        return;
+      }
+      if(current){
+        var item = line.replace(/^[•\-–]\s*/, "");
+        current.items.push(item);
+      }
+    });
+    var metaBits = [];
+    if(d.messages_count != null && d.messages_count !== "—") metaBits.push("Сообщений: " + d.messages_count);
+    if(d.masked_total != null && d.masked_total !== "—") metaBits.push("скрыто данных: " + d.masked_total);
+    if(d.engine) metaBits.push(d.engine === "gigachat" ? "собрано: GigaChat" : "собрано: резервный модуль");
+    if(footer) metaBits.push(footer);
+
+    if(!cats.length){
+      container.innerHTML = '<div class="card"><h3>' + esc(title) + '</h3>' +
+        '<div class="digest-raw">' + esc(text) + "</div>" +
+        (metaBits.length ? '<div class="meta">' + esc(metaBits.join(" · ")) + "</div>" : "") + "</div>";
+      container.classList.remove("hidden");
+      return;
+    }
+    var html = '<div class="card"><h3>' + esc(title) + "</h3>";
+    cats.forEach(function(c){
+      html += '<div class="cat ' + c.key + '"><h4>' + esc(c.head) + "</h4><ul>";
+      c.items.forEach(function(item){
+        if(item.indexOf("пусто") >= 0){
+          html += '<li class="empty">— пусто —</li>';
+        } else {
+          html += "<li>" + esc(item) + "</li>";
+        }
+      });
+      html += "</ul></div>";
+    });
+    if(metaBits.length) html += '<div class="meta">' + esc(metaBits.join(" · ")) + "</div>";
+    html += "</div>";
+    container.innerHTML = html;
+    container.classList.remove("hidden");
+  }
+
+  /* ---------- Главная: счётчики, статус и личный блок ---------- */
+  function refreshStats(){
+    api("/api/stats").then(function(s){
+      var me = s.me;
+      if(me){
+        document.getElementById("stChats").textContent = s.chats == null ? "—" : s.chats;
+        document.getElementById("stChatsLbl").textContent = "чатов подключено";
+      } else {
+        document.getElementById("stChats").textContent = s.digests_sent == null ? "—" : s.digests_sent;
+        document.getElementById("stChatsLbl").textContent = "сводок уже собрано";
+      }
+      document.getElementById("stMsgs").textContent   = s.messages_processed == null ? "—" : s.messages_processed;
+      document.getElementById("stMasked").textContent = s.masked_total == null ? "—" : s.masked_total;
+      document.getElementById("stSaved").textContent  = s.saved_minutes == null ? "—" : s.saved_minutes;
+      var pill = document.getElementById("botPill");
+      pill.textContent = s.bot_running ? STATUS_ON : STATUS_OFF;
+      pill.className = "pill " + (s.bot_running ? "" : "wait");
+
+      if(me){
+        var box = document.getElementById("meBox");
+        box.classList.remove("hidden");
+        var chats = (me.chats || []).map(function(c){ return esc(c.title); });
+        var chatsLine = chats.length ? chats.join(", ") : "пока нет — добавьте бота в чат класса";
+        var sched = me.schedule || "19:00";
+        var schedNote = me.schedule ? "" : " (по умолчанию)";
+        // своё время учителя может не совпасть с сеткой — добавляем отдельным чипом
+        var times = ["14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
+        if (times.indexOf(sched) < 0) times.push(sched);
+        box.innerHTML = "<h3>Ваша панель</h3>" +
+          "<p>Классы: " + chatsLine + "</p>" +
+          '<p>Автосводка каждый день в <b>' + esc(sched) + "</b>" + esc(schedNote) + "</p>" +
+          '<div class="sched">' +
+          times.map(function(t){
+            var on = t === sched ? " on" : "";
+            return '<button class="chipbtn' + on + '" data-time="' + esc(t) + '">' + esc(t) + "</button>";
+          }).join("") + "</div>";
+        box.querySelectorAll(".chipbtn").forEach(function(b){
+          b.addEventListener("click", function(){ setSchedule(b.dataset.time); });
+        });
+      } else {
+        document.getElementById("guestBox").classList.remove("hidden");
+        document.getElementById("meBox").classList.add("hidden");
+      }
+    }).catch(function(){});
+  }
+
+  function setSchedule(t){
+    api("/api/schedule", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({time: t})
+    }).then(function(){
+      toast("Расписание обновлено: " + t + " ✓");
+      refreshStats();
+    }).catch(function(e){ toast("Ошибка: " + e.message); });
+  }
+
+  /* ---------- Сводка ---------- */
+  function collectDigest(btn, target){
+    busy(btn, true);
+    api("/api/digest", {method:"POST"}).then(function(d){
+      if(!d.text){ toast("В буфере пока нет сообщений — загрузите демо-чат"); return; }
+      renderDigest(target, d);
+      toast("Сводка готова ✓");
+      refreshStats();
+    }).catch(function(e){ toast("Ошибка: " + e.message); })
+      .finally(function(){ busy(btn, false); });
+  }
+  var digestCard = document.getElementById("digestCard");
+  document.getElementById("digestBtn").addEventListener("click", function(){
+    collectDigest(this, digestCard);
+  });
+  document.getElementById("homeDigestBtn").addEventListener("click", function(){
+    goto("digest");
+    collectDigest(document.getElementById("digestBtn"), digestCard);
+  });
+
+  api("/api/digest/latest").then(function(d){
+    if(d && d.text){
+      renderDigest(digestCard, {
+        text:d.text, messages_count:"—", masked_total:"—",
+        engine:d.source
+      });
+    }
+  }).catch(function(){});
+
+  /* ---------- Демо ---------- */
+  function chip(label, n){ return '<span class="chip good">' + label + ": " + (n == null ? 0 : n) + "</span>"; }
+  document.getElementById("demoBtn").addEventListener("click", function(){
+    var b = this; busy(b, true);
+    api("/api/demo", {method:"POST"}).then(function(d){
+      var html = '<div class="card">' +
+        "<h3>Загружено " + d.count + " сообщений</h3>" +
+        '<div class="chips">' +
+          chip("телефоны", d.phones) + chip("карты", d.cards) +
+          chip("СНИЛС", d.snils) + chip("паспорта", d.passports) +
+          chip("почта", d.emails) + chip("имена", d.names) +
+        "</div><p>Всего замаскировано: <b>" + d.masked_total + "</b> фрагментов. " +
+        "Сверху — как писали родители, снизу — что ушло в нейросеть.</p></div>";
+      (d.examples || []).slice(0, 3).forEach(function(ex){
+        html += '<div class="pair">' +
+          '<div class="was"><span class="lbl">До · сообщение родителя</span>' + esc(ex.original) + "</div>" +
+          '<div class="now"><span class="lbl">После · видит нейросеть</span>' + highlightMasked(ex.masked) + "</div>" +
+          "</div>";
+      });
+      document.getElementById("demoResults").innerHTML = html;
+      document.getElementById("demoDigestBtn").classList.remove("hidden");
+      toast("Демо-чат загружен ✓"); refreshStats();
+    }).catch(function(e){ toast("Ошибка: " + e.message); })
+      .finally(function(){ busy(b, false); });
+  });
+  document.getElementById("demoDigestBtn").addEventListener("click", function(){
+    var b = this; busy(b, true);
+    api("/api/digest", {method:"POST"}).then(function(d){
+      if(!d.text){ toast("Буфер пуст — сначала загрузите демо-чат"); return; }
+      /* Сводка — финал демо: сначала пары «До/После», затем дайджест внизу. */
+      var holder = document.createElement("div");
+      document.getElementById("demoResults").appendChild(holder);
+      renderDigest(holder, d);
+      holder.scrollIntoView({behavior:"smooth", block:"start"});
+      toast("Сводка готова ✓"); refreshStats();
+    }).catch(function(e){ toast("Ошибка: " + e.message); })
+      .finally(function(){ busy(b, false); });
+  });
+
+  /* ---------- Песочница защиты ---------- */
+  document.getElementById("anonBtn").addEventListener("click", function(){
+    var b = this; busy(b, true);
+    var source = document.getElementById("sandboxText").value;
+    api("/api/anonymize", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text: source})
+    }).then(function(d){
+      var s = d.stats || {};
+      document.getElementById("anonResults").innerHTML =
+        '<div class="pair" style="margin-top:14px;">' +
+          '<div class="was"><span class="lbl">До · ваш текст</span>' + esc(source) + "</div>" +
+          '<div class="now"><span class="lbl">После · увидит нейросеть</span>' + highlightMasked(d.masked) + "</div>" +
+        "</div>" +
+        '<div class="chips">' +
+          chip("телефоны", s.phones) + chip("карты", s.cards) +
+          chip("СНИЛС", s.snils) + chip("паспорта", s.passports) +
+          chip("почта", s.emails) + chip("имена", s.names) +
+        "</div>" +
+        '<p style="color:var(--muted); font-size:13.5px;">Диагнозы в тексте не маскируются, ' +
+        "но в готовую сводку они не попадают: учитель видит «отсутствует по болезни».</p>";
+    }).catch(function(e){ toast("Ошибка: " + e.message); })
+      .finally(function(){ busy(b, false); });
+  });
+
+  refreshStats();
+  setInterval(refreshStats, 30000);
+
+  /* ---------- Подсказка про подключение ---------- */
+  document.getElementById("connectBtn").addEventListener("click", function(){
+    goto("info");
+    toast("Шаги подключения — во вкладке «Инфо»");
+  });
+})();
+</script>
+</body>
+</html>
