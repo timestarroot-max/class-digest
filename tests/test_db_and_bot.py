@@ -623,40 +623,29 @@ def test_extract_mid_reads_nested_body():
 
 
 async def test_admin_event_success_flow(tmp_path, monkeypatch):
-    """Назначение админом: гайд удаляем только при праве «Удалять сообщения»."""
+    """Назначение админом: право удаления проверяем делом, а не по списку прав."""
     from app.bot import handlers
 
     db = await _make_db(tmp_path)
     await db.link_chat(500, 42, "3А класс")
     await db.set_admin_hint_mid(500, "mid.hint1")
-    await db.link_chat(501, 42, "3Б класс")
-    await db.set_admin_hint_mid(501, "mid.hint2")
 
     bot = _FakeAdminBot()
     monkeypatch.setattr(handlers, "_bot", bot)
     monkeypatch.setattr(handlers, "_db", db)
 
-    # Чат без права удаления: гайд остаётся, автоочистка выключена.
-    await handlers.on_admin_permissions_changed({
-        "chat_id": 501, "user_id": 42, "is_admin": True,
-        "permissions": ["read_all_messages"],
-    })
-    assert await db.get_bot_admin_state(501) is True
-    assert await db.get_bot_delete_right(501) is False
-    assert bot.deleted == [], "без права удаления гайд не трогаем"
-
-    bot.sent.clear()
-    # Шаг 1: назначили админом с правом удаления — гайд убираем.
+    # В событии MAX права удаления нет вовсе — но удаление проходит.
     await handlers.on_admin_permissions_changed({
         "chat_id": 500, "user_id": 42, "is_admin": True,
-        "permissions": ["read_all_messages", "delete_messages"],
+        "permissions": ["read_all_messages"],
     })
     assert await db.get_bot_admin_state(500) is True
-    assert await db.get_bot_delete_right(500) is True
-    assert bot.deleted == ["mid.hint1"], "гайд должен удалиться из чата"
+    assert await db.get_bot_delete_right(500) is True, "удаление прошло — право есть"
+    assert bot.deleted == ["mid.hint1"], "подсказка должна удалиться из чата"
     assert await db.get_admin_hint_mid(500) is None
     # Сообщение в чат + ЛС тому, кто назначил.
     assert [s["target"] for s in bot.sent] == [500, 42]
+    assert "удалил" in bot.sent[0]["text"], bot.sent[0]["text"]
     assert "администратором" in bot.sent[1]["text"]
     assert "Сводка за день" in bot.sent[1]["text"]
 
@@ -774,3 +763,32 @@ async def test_link_allowed_only_for_owner(tmp_path, monkeypatch):
     assert await handlers._link_allowed(780, 42) is True
     assert await handlers._link_allowed(780, 999) is False
     assert await handlers._link_allowed(999999, 5) is True
+
+
+async def test_admin_event_keeps_hint_without_delete_right(tmp_path, monkeypatch):
+    """Если MAX не даёт удалять — подсказка остаётся и обещания в тексте нет."""
+    from app.bot import handlers
+
+    class DeniedBot(_FakeAdminBot):
+
+        async def delete_message(self, mid):
+            raise RuntimeError(
+                "access.denied: Insufficient permissions to delete message"
+            )
+
+    db = await _make_db(tmp_path)
+    await db.link_chat(510, 42, "3В класс")
+    await db.set_admin_hint_mid(510, "mid.hint")
+
+    bot = DeniedBot()
+    monkeypatch.setattr(handlers, "_bot", bot)
+    monkeypatch.setattr(handlers, "_db", db)
+
+    await handlers.on_admin_permissions_changed({
+        "chat_id": 510, "user_id": 42, "is_admin": True,
+        "permissions": ["read_all_messages"],
+    })
+
+    assert await db.get_admin_hint_mid(510) == "mid.hint", "подсказку не тронули"
+    assert await db.get_bot_delete_right(510) is False
+    assert "удалил" not in bot.sent[0]["text"], bot.sent[0]["text"]

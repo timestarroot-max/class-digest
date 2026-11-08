@@ -92,7 +92,11 @@ ADMIN_SUCCESS_DM = (
 
 ADMIN_GROUP_DONE = (
     "✅ Права получены — я настроен и начинаю собирать сводку этого чата. "
-    "Напоминание с инструкцией удаляю, чтобы не мешать переписке."
+    "Напоминание с инструкцией удалил, чтобы не мешать переписке."
+)
+# Если убрать напоминание не получилось — обещать это в тексте нельзя.
+ADMIN_GROUP_DONE_KEEP = (
+    "✅ Права получены — я настроен и начинаю собирать сводку этого чата."
 )
 
 ADMIN_LOST_DM = (
@@ -209,17 +213,31 @@ async def _cleanup_allowed(chat_id: int) -> bool:
 
 async def _probe_delete_right(chat_id: int, mid: str | None) -> bool:
     """Право удаления проверяем делом: в событии назначения MAX его не присылает.
-    Пробуем убрать сообщение отправителя — получилось, значит право выдано."""
+    Пробуем убрать сообщение — получилось, значит право выдано."""
     if not mid:
         return False
     try:
         await _bot.delete_message(mid)
     except Exception as exc:  # noqa: BLE001 - права может не быть
-        logger.info("Право удаления недоступно в чате %s (%s)", chat_id, exc)
-        await _db.set_bot_delete_right(chat_id, False)
+        if "denied" in str(exc).lower() or "permission" in str(exc).lower():
+            logger.info("Право удаления недоступно в чате %s (%s)", chat_id, exc)
+            await _db.set_bot_delete_right(chat_id, False)
+        else:
+            logger.warning("Не удалось удалить сообщение %s: %s", mid, exc)
         return False
     logger.info("Право удаления подтверждено в чате %s", chat_id)
     await _db.set_bot_delete_right(chat_id, True)
+    return True
+
+
+async def _drop_admin_hint(chat_id: int) -> bool:
+    """🔑-подсказка нужна только до назначения: убираем, как только бот станет админом."""
+    mid = await _db.get_admin_hint_mid(chat_id)
+    if not mid or not await _db.get_bot_admin_state(chat_id):
+        return False
+    if not await _probe_delete_right(chat_id, mid):
+        return False
+    await _db.set_admin_hint_mid(chat_id, None)
     return True
 
 
@@ -516,19 +534,15 @@ async def on_admin_permissions_changed(event: dict) -> None:
         if is_admin and not was_admin:
             await _db.set_bot_admin_state(chat_id, True)
 
-            # Гайд больше не нужен: убираем, если право удаления есть.
-            mid = await _db.get_admin_hint_mid(chat_id)
-            if mid and await _db.get_bot_delete_right(chat_id):
-                try:
-                    await _bot.delete_message(mid)
-                except Exception:  # noqa: BLE001 - чат мог быть пересоздан
-                    logger.warning("Не удалось удалить гайд из чата %s", chat_id)
-                await _db.set_admin_hint_mid(chat_id, None)
+            # Право удаления в событии не приходит — проверяем делом.
+            hint_removed = await _drop_admin_hint(chat_id)
 
             # Короткое подтверждение в чат и подробности — в ЛС.
             try:
                 await _bot.send_message(
-                    chat_id=chat_id, text=ADMIN_GROUP_DONE
+                    chat_id=chat_id,
+                    text=(ADMIN_GROUP_DONE if hint_removed
+                          else ADMIN_GROUP_DONE_KEEP),
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("Не удалось написать в чат %s", chat_id)
@@ -616,6 +630,7 @@ async def _connect_in_group(event: MessageCreated, ttl: int | None = None) -> No
             for mid in mids:
                 _schedule_delete(mid, ttl, chat_id)
 
+    await _drop_admin_hint(chat_id)
     logger.info("Чат %s («%s») привязан к %s", chat_id, title, sender.user_id)
 
 
@@ -686,6 +701,7 @@ async def on_digest_command(event: MessageCreated) -> None:
                 if not command_gone:
                     _schedule_delete(_message_mid(message), GROUP_ONLY_TTL,
                                      chat_id)
+            await _drop_admin_hint(chat_id)
             logger.info("Команда /digest в группе — подсказка про личные сообщения")
             return
         await _send_digests_to_user(sender.user_id)
@@ -719,6 +735,7 @@ async def on_demo_command(event: MessageCreated) -> None:
                 if not command_gone:
                     _schedule_delete(_message_mid(message), GROUP_ONLY_TTL,
                                      chat_id)
+            await _drop_admin_hint(chat_id)
             logger.info("Команда /demo в группе — подсказка про личные сообщения")
             return
         info = await digest.load_demo_messages(_db, DEMO_CHAT_ID)
