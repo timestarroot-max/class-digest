@@ -96,6 +96,9 @@ async def send_scheduled_digests(db: Database, bot=None) -> None:
 async def cleanup_job(db: Database) -> None:
     try:
         removed = await db.cleanup_old_messages(hours=24)
+        old_digests = await db.cleanup_old_digests(hours=24)
+        if old_digests:
+            logger.info("Цифровая гигиена: удалено %s старых сводок", old_digests)
         if removed:
             logger.info(
                 "Цифровая гигиена: удалено %s сообщений старше суток",

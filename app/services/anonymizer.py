@@ -115,8 +115,23 @@ def _token_number(normal_name: str) -> int:
     return zlib.crc32(normal_name.strip().lower().encode("utf-8")) % 9973 + 1
 
 
-def _token(prefix: str, normal_name: str) -> str:
+def _token_numbers_busy(name_map: dict, prefix: str) -> dict[int, str]:
+    """Какие номера маркеров уже заняты в этой карте."""
+    busy: dict[int, str] = {}
+    for token, name in name_map.items():
+        match = _TOKEN_RE.fullmatch(token.strip())
+        if match and match.group(1) == prefix:
+            busy[int(match.group(2))] = name
+    return busy
+
+
+def _token(prefix: str, normal_name: str, name_map: dict | None = None) -> str:
+    """Маркер человека. Если номер уже занят другим именем — берём следующий."""
     number = _token_number(normal_name)
+    if name_map is not None:
+        busy = _token_numbers_busy(name_map, prefix)
+        while busy.get(number) not in (None, normal_name):
+            number = number % 9973 + 1
     initials = _to_initials(normal_name)
     if initials:
         return f"[{prefix}_{number} | {initials}]"
@@ -144,10 +159,17 @@ def restore_names(text: str, mapping: dict) -> str:
 
     def _sub(match):
         key = f"{match.group(1)}_{match.group(2)}"
-        if key in by_id:
-            return by_id[key]
+        name = by_id.get(key)
         initials = (match.group(3) or "").strip()
-        return initials if initials else match.group(0)
+        # Номер мог достаться другому человеку — тогда верим инициалам.
+        if initials:
+            from_initials = by_initials.get(initials.lower())
+            if name is None:
+                return from_initials or initials
+            if initials_of(name).lower() != initials.lower():
+                return from_initials or name
+            return name
+        return name or match.group(0)
 
     text = _TOKEN_RE.sub(_sub, text)
 
@@ -218,7 +240,7 @@ def _mask_single_names(masked: str, local_map: dict, stats: MaskStats, vocab) ->
                 normal = " ".join(
                     part.capitalize() for part in str(parse.normal_form).split()
                 )
-                token = _token("PER", normal)
+                token = _token("PER", normal, local_map)
                 local_map[token] = normal
                 stats.names += 1
                 return token
@@ -257,7 +279,7 @@ def mask_text(text: str, name_map: dict | None = None) -> tuple[str, MaskStats]:
                 normal = span.normal or span.text
             except Exception:
                 normal = span.text
-            token = _token("PER", normal)
+            token = _token("PER", normal, local_map)
             masked = masked[:span.start] + token + masked[span.stop:]
             local_map[token] = normal
             stats.names += 1
@@ -279,6 +301,6 @@ def mask_person_name(name: str, name_map: dict | None = None) -> str:
         return clean
     if name_map is None:
         return _to_initials(clean)
-    token = _token("USR", clean)
+    token = _token("USR", clean, name_map)
     name_map[token] = clean
     return token

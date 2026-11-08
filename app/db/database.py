@@ -244,10 +244,18 @@ class Database:
         return bool(row and row[0])
 
     async def unlink_chat(self, chat_id: int) -> None:
+        """Бота убрали из чата — забираем с собой и все его данные."""
         async with aiosqlite.connect(self.path) as conn:
             cur = await conn.cursor()
+            await cur.execute("DELETE FROM chats WHERE chat_id = ?", (chat_id,))
             await cur.execute(
-                "DELETE FROM chats WHERE chat_id = ?", (chat_id,)
+                "DELETE FROM messages_buffer WHERE chat_id = ?", (chat_id,)
+            )
+            await cur.execute(
+                "DELETE FROM digests_history WHERE chat_id = ?", (chat_id,)
+            )
+            await cur.execute(
+                "DELETE FROM calendar_events WHERE chat_id = ?", (chat_id,)
             )
             await conn.commit()
             await cur.close()
@@ -439,7 +447,7 @@ class Database:
             )
         return removed
 
-    # История сводок (без ПДн)
+    # История сводок: текст уже с именами для учителя, поэтому храним не дольше суток.
 
     async def save_digest(self, chat_id: int, text: str, source: str) -> None:
         async with aiosqlite.connect(self.path) as conn:
@@ -451,6 +459,20 @@ class Database:
             )
             await conn.commit()
             await cur.close()
+
+    async def cleanup_old_digests(self, hours: int = 24) -> int:
+        """В сводках настоящие имена детей — держим их тоже не дольше суток."""
+        async with aiosqlite.connect(self.path) as conn:
+            cur = await conn.cursor()
+            await cur.execute(
+                "DELETE FROM digests_history "
+                "WHERE created_at <= datetime('now', ?)",
+                (f"-{int(hours)} hours",),
+            )
+            removed = cur.rowcount
+            await conn.commit()
+            await cur.close()
+        return removed
 
     async def get_last_digest(self, chat_id: int) -> dict | None:
         async with aiosqlite.connect(self.path) as conn:

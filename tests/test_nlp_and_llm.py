@@ -408,3 +408,31 @@ def test_medical_phrase_not_duplicated():
     )
     assert once.count("по болезни") == 1, once
     assert "39" not in once and "температур" not in once.lower()
+
+
+def test_digest_has_no_tail_dashes():
+    """GigaChat вешает дефис в конце заголовков и пунктов — убираем."""
+    from app.services.digest import prettify_digest
+
+    raw = ("❓ Вопросы к учителю -\n"
+           "• Что принести к пятнице? (С. М.) -\n"
+           "• Кто дежурный? -")
+    out = prettify_digest(raw)
+    assert " -" not in out, out
+    assert out.startswith("❓ Вопросы к учителю")
+
+
+def test_medical_details_not_sent_to_llm():
+    """Диагнозы и измерения нейтрализуются до отправки в модель."""
+    from app.services.llm_gigachat import mask_medical_details
+
+    clean = mask_medical_details(
+        "Миша заболел, температура 39, простуда, справку принесём"
+    )
+    assert "39" not in clean, clean
+    assert "простуда" not in clean.lower()
+    assert "температур" not in clean.lower()
+    assert "справку принесём" in clean
+    # обычные слова не портим
+    assert mask_medical_details("Завтра собрание в 18:00") == "Завтра собрание в 18:00"
+    assert "жарко" in mask_medical_details("На улице жарко")

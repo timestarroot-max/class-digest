@@ -37,6 +37,10 @@ WELCOME_TEXT = ('Здравствуйте! Я бот "Классный дайд�
 
 ERROR_TEXT = "⚠️ Что-то пошло не так, попробуйте ещё раз"
 
+ALREADY_LINKED_TEXT = (
+    "Этот чат уже подключён к классному руководителю — сводки приходят ему."
+)
+
 PRIVATE_GREETING = (
     "Здравствуйте! Я бот «Классный дайджест»: тихо слежу за чатом класса, "
     "прячу личные данные и присылаю вам короткую сводку.\n\n"
@@ -190,6 +194,12 @@ async def _group_only_text(chat_id: int) -> str:
     if await _db.get_bot_delete_right(chat_id):
         return GROUP_ONLY_TEXT
     return GROUP_ONLY_TEXT_NO_DELETE
+
+
+async def _link_allowed(chat_id: int, user_id: int) -> bool:
+    """Перепривязывать чат можно только его владельцу — иначе сводки с именами уведут."""
+    owner = await _db.get_chat_owner(chat_id)
+    return owner is None or owner == user_id
 
 
 async def _cleanup_allowed(chat_id: int) -> bool:
@@ -436,7 +446,10 @@ async def on_bot_added(event: BotAdded) -> None:
         return
     try:
         title = await _fetch_chat_title(event)
-        await _db.link_chat(event.chat_id, event.user.user_id, title)
+        if await _link_allowed(event.chat_id, event.user.user_id):
+            await _db.link_chat(event.chat_id, event.user.user_id, title)
+        else:
+            logger.info("Чат %s уже привязан — привязку не меняем", event.chat_id)
         await _bot.send_message(chat_id=event.chat_id, text=WELCOME_TEXT)
         # Запоминаем id гайда: после назначения админом бот его уберёт.
         hint = await _bot.send_message(
@@ -565,6 +578,12 @@ async def _connect_in_group(event: MessageCreated, ttl: int | None = None) -> No
     if chat_id is None or sender is None:
         return
     title = await _fetch_chat_title(event)
+    if not await _link_allowed(chat_id, sender.user_id):
+        await message.answer(ALREADY_LINKED_TEXT)
+        logger.info(
+            "Чат %s уже привязан к другому учителю — привязку не меняем", chat_id
+        )
+        return
     await _db.link_chat(chat_id, sender.user_id, title)
 
     mids: list[str | None] = [_message_mid(message)] if ttl is not None else []

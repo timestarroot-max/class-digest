@@ -726,3 +726,51 @@ async def test_bot_delete_right_flag(tmp_path):
     assert await db.get_bot_delete_right(901) is False
     await db.set_bot_delete_right(901, True)
     assert await db.get_bot_delete_right(901) is True
+
+
+async def test_unlink_chat_removes_chat_data(tmp_path):
+    """Бота убрали из чата — данные чата тоже уходят."""
+    db = await _make_db(tmp_path)
+    await db.link_chat(770, 42, "3А класс")
+    await db.add_message(770, "[USR_1 | М. И.]", "текст", masked=1)
+    await db.save_digest(770, "сводка с именами", "gigachat")
+    await db.save_events(770, [{"title": "Собрание", "date": None, "time": "18:00"}])
+
+    await db.unlink_chat(770)
+
+    assert await db.get_chat_owner(770) is None
+    assert await db.count_messages(770) == 0
+    assert await db.get_last_digest(770) is None
+    assert await db.get_events(770) == []
+
+
+async def test_old_digests_are_cleaned(tmp_path):
+    """История сводок тоже не хранится бессрочно."""
+    import aiosqlite
+
+    db = await _make_db(tmp_path)
+    await db.link_chat(771, 42, "3А класс")
+    await db.save_digest(771, "свежая сводка", "gigachat")
+    async with aiosqlite.connect(db.path) as conn:
+        await conn.execute(
+            "UPDATE digests_history SET created_at = datetime('now', '-30 hours')"
+        )
+        await conn.commit()
+
+    removed = await db.cleanup_old_digests(hours=24)
+
+    assert removed == 1
+    assert await db.get_last_digest(771) is None
+
+
+async def test_link_allowed_only_for_owner(tmp_path, monkeypatch):
+    """Чужой участник не может перепривязать чат на себя."""
+    from app.bot import handlers
+
+    db = await _make_db(tmp_path)
+    await db.link_chat(780, 42, "3А класс")
+    monkeypatch.setattr(handlers, "_db", db)
+
+    assert await handlers._link_allowed(780, 42) is True
+    assert await handlers._link_allowed(780, 999) is False
+    assert await handlers._link_allowed(999999, 5) is True

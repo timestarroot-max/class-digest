@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 # Заголовки четырёх категорий сводки.
 CATEGORY_MARKS = ("❓", "🏥", "💰", "⚡")
 
+# GigaChat вешает дефис в конце заголовков и пунктов — в сообщении это мусор.
+_TAIL_DASH_RE = re.compile(r"[\s]*[-—–]+\s*$")
+
+
+def _drop_tail_dash(text: str) -> str:
+    """«Вопросы к учителю -» -> «Вопросы к учителю»."""
+    return _TAIL_DASH_RE.sub("", text).strip()
+
 
 def prettify_digest(text: str) -> str:
     """Раскладывает сводку по строкам: MAX переносы рисует, а ИИ шлёт всё одной строкой."""
@@ -30,13 +38,13 @@ def prettify_digest(text: str) -> str:
     lines: list[str] = []
     for raw in flat.split("\n"):
         head, _, tail = raw.strip().partition("•")
-        head = head.strip()
+        head = _drop_tail_dash(head.strip())
         if head:
             if head.startswith(CATEGORY_MARKS) and lines:
                 lines.append("")
             lines.append(head)
         for item in tail.split("•"):
-            item = item.strip()
+            item = _drop_tail_dash(item.strip())
             if item:
                 lines.append(f"• {item}")
     return "\n".join(lines)
@@ -72,6 +80,10 @@ async def make_digest(db: Database, chat_id: int) -> DigestResult:
         )
 
     masked_total = sum(int(m.get("masked", 0) or 0) for m in messages)
+
+    # Диагнозы и измерения нейтрализуем ещё до ИИ: в модель уходит «по болезни».
+    for message in messages:
+        message["text"] = llm_gigachat.mask_medical_details(message.get("text", ""))
 
     # Карта «маркер → полное имя»: по ней сводка вернёт учителю настоящие имена.
     restore_map: dict = {}
