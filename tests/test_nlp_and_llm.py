@@ -596,3 +596,29 @@ async def test_make_digest_keeps_short_message(tmp_path, monkeypatch):
     await db.close()
 
     assert "контрольная" in result.text.lower(), result.text
+
+
+def test_digest_single_line_model_answer_is_kept():
+    """Модель пишет сводку одной строкой — буфер в этом случае добирать нельзя."""
+    from app.services.digest import _ensure_not_empty
+
+    messages = [{"text": "Здравствуйте! Миша Смирнов заболел, по болезни, сидим дома 😔",
+                 "sender": "[USR_1 | С. О.]"}]
+    model = ("❓ Вопросы к учителю • Куда сдать форму? (А. Б.) "
+             "🏥 Отсутствующие и справки • Миша болеет (С. О.)")
+
+    assert _ensure_not_empty(model, messages) == model
+
+
+def test_digest_stays_empty_for_noise_only():
+    """Из одних открыток и «+1» сводку не собираем."""
+    from app.services.digest import _ensure_not_empty
+
+    messages = [
+        {"text": "С добрым утром, дорогие родители!", "sender": "[USR_1 | О. С.]"},
+        {"text": "+1", "sender": "[USR_2 | А. Б.]"},
+        {"text": "Спасибо!", "sender": "[USR_3 | М. П.]"},
+    ]
+    out = _ensure_not_empty("❓ Вопросы к учителю — пусто", messages)
+
+    assert "•" not in out, out

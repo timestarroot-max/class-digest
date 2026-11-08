@@ -117,20 +117,55 @@ def _category_mark(text: str) -> str:
     return llm_gigachat.CATEGORY_ACTIONS
 
 
+# Сообщения-шум: открытки, «+1», благодарности — в добор не берём.
+_NOISE_RE = re.compile(
+    r"^\s*(?:\+?\d+|спасибо[!.,\s]*|благодар\w*|с добрым утром\w*|"
+    r"с праздником\w*|добрый (?:день|вечер)|поздравля\w*|"
+    r"[\W_]+)\s*$",
+    re.IGNORECASE,
+)
+
+# Школьные дела: если модель потеряла такое сообщение, добираем его сами.
+_SCHOOL_HINTS = (
+    "контрольн", "диктант", "тест", "зачёт", "зачет", "олимпиад", "домашн",
+    "учебник", "тетрад", "выучить", "повторить", "экскурс", "поход", "сменк",
+    "форма", "линейк", "утренник",
+)
+
+
+def _is_meaningful(body: str) -> bool:
+    """Шум вроде «Спасибо!» и «+1» в добор не берём."""
+    if len(body.strip(" !?.…")) < 8:
+        return False
+    if _NOISE_RE.match(body):
+        return False
+
+    low = body.lower()
+    hints = (
+        llm_gigachat.QUESTION_HINTS + llm_gigachat.ABSENCE_HINTS
+        + llm_gigachat.MONEY_HINTS + llm_gigachat.ACTION_HINTS + _SCHOOL_HINTS
+    )
+    return "?" in body or any(hint in low for hint in hints)
+
+
 def _ensure_not_empty(text: str, messages: list[dict]) -> str:
-    """Модель может свернуть короткое сообщение в пустоту — тогда собираем сводку сами."""
-    if any(line.strip().startswith("•") for line in text.split("\n")):
+    """Модель может отдать пустую сводку — тогда добираем пункты из сообщений."""
+    # Важно: модель нередко пишет всю сводку одной строкой, поэтому ищем маркер
+    # по всему тексту, а не в начале строки — иначе добирается весь буфер подряд.
+    if "•" in text:
         return text
 
     buckets: dict[str, list[str]] = {}
     for message in messages:
         body = " ".join(str(message.get("text") or "").split())
-        if not body:
+        if not _is_meaningful(body):
             continue
-        short = body if len(body) <= 160 else body[:159] + "…"
+        short = body if len(body) <= 140 else body[:139] + "…"
         sender = str(message.get("sender") or "").strip()
         line = f"{short} ({sender})" if sender else short
-        buckets.setdefault(_category_mark(body), []).append(line)
+        bucket = buckets.setdefault(_category_mark(body), [])
+        if len(bucket) < 5:
+            bucket.append(line)
 
     if not buckets:
         return text
