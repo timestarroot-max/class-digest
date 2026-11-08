@@ -154,6 +154,8 @@ async def load_demo_messages(db: Database, chat_id: int) -> dict:
             item["sender"], name_map=demo_map
         )
         masked_text, stats = anonymizer.mask_text(item["text"], name_map=demo_map)
+        # В модель уходит тот же текст, что видно в примерах: диагнозы тоже прячем.
+        masked_text = llm_gigachat.mask_medical_details(masked_text)
         total_stats = total_stats + stats
 
         await db.add_message(

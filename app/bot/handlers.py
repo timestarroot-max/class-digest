@@ -23,7 +23,7 @@ from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 from app.bot.keyboards import back_menu, main_menu, schedule_menu
 from app.config import DEMO_CHAT_ID, DEMO_CHAT_TITLE, DATA_DIR, settings
 from app.db.database import Database
-from app.services import anonymizer, calendar_export, digest
+from app.services import anonymizer, calendar_export, digest, llm_gigachat
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -904,6 +904,8 @@ async def collect_chat_message(event: MessageCreated) -> None:
             sender.full_name, name_map=name_map
         )
         masked_text, stats = anonymizer.mask_text(text, name_map=name_map)
+        # В буфере и в модели один и тот же текст: диагнозы прячем сразу.
+        masked_text = llm_gigachat.mask_medical_details(masked_text)
         await _db.add_message(
             chat_id, masked_sender, masked_text,
             masked=int(stats.total), name_map=name_map or None,

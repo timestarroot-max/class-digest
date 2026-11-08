@@ -436,3 +436,28 @@ def test_medical_details_not_sent_to_llm():
     # обычные слова не портим
     assert mask_medical_details("Завтра собрание в 18:00") == "Завтра собрание в 18:00"
     assert "жарко" in mask_medical_details("На улице жарко")
+
+
+async def test_demo_examples_hide_medical_details(tmp_path):
+    """Витрина демо показывает то же, что уходит в модель: без диагнозов."""
+    from app.db.database import Database
+    from app.services import digest
+
+    db = Database(str(tmp_path / "demo.db"))
+    await db.init()
+    info = await digest.load_demo_messages(db, 999001)
+    await db.close()
+
+    pairs = " ".join(e["masked"] for e in info["examples"]).lower()
+    assert "по болезни" in pairs, pairs
+    for word in ("простуда", "температур", "ротавирус"):
+        assert word not in pairs, f"{word} остался в примере «После»"
+
+
+def test_medical_input_has_no_repeats():
+    """В витрине не должно быть «по болезни, по болезни»."""
+    from app.services.llm_gigachat import mask_medical_details
+
+    out = mask_medical_details("у нас простуда, температура 39 второй день")
+    assert out.count("по болезни") == 1, out
+    assert "39" not in out, out

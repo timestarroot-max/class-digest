@@ -129,14 +129,12 @@ def mask_medical_details(text: str) -> str:
     clean = _MEASURE_INPUT_RE.sub("по болезни", text)
     clean = _MEDICAL_INPUT_RE.sub("по болезни", clean)
     clean = _ILLNESS_NUMBER_TAIL_RE.sub("по болезни", clean)
-    return " ".join(clean.split())
+    return " ".join(_collapse_illness(clean).split())
 
 
-def sanitize_medical(text: str) -> str:
-    """Диагнозы, симптомы и лекарства заменяем на «по болезни»."""
-    clean = _MEDICAL_RE.sub("по болезни", text)
-    clean = _ILLNESS_NUMBERS_RE.sub("по болезни ", clean)
-    clean = _ILLNESS_ADJ_BEFORE_RE.sub("", clean)
+def _collapse_illness(text: str) -> str:
+    """«по болезни, высокая по болезни» -> «по болезни»."""
+    clean = _ILLNESS_ADJ_BEFORE_RE.sub("", text)
     clean = _ILLNESS_ADJ_AFTER_RE.sub("по болезни", clean)
     clean = _ILLNESS_REPEAT_RE.sub("по болезни", clean)
     clean = _ILLNESS_GAP_REPEAT_RE.sub("по болезни\\1", clean)
@@ -146,7 +144,14 @@ def sanitize_medical(text: str) -> str:
         if merged == clean:
             break
         clean = merged
-    return " ".join(clean.split())
+    return clean
+
+
+def sanitize_medical(text: str) -> str:
+    """Диагнозы, симптомы и лекарства заменяем на «по болезни»."""
+    clean = _MEDICAL_RE.sub("по болезни", text)
+    clean = _ILLNESS_NUMBERS_RE.sub("по болезни ", clean)
+    return " ".join(_collapse_illness(clean).split())
 
 
 # GigaChat меняет эмодзи заголовков и добавляет markdown-звёздочки — возвращаем свои.

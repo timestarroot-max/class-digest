@@ -129,6 +129,10 @@ def create_app(db: Database) -> FastAPI:
 
         try:
             masked, stats = anonymizer.mask_text(payload.text)
+            # Песочница показывает ровно то, что уходит в модель.
+            from app.services import llm_gigachat
+
+            masked = llm_gigachat.mask_medical_details(masked)
             return {
                 "masked": masked,
                 "stats": {
