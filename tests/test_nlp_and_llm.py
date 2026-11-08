@@ -284,7 +284,7 @@ def test_extract_events_explicit_year_kept():
 
 
 def test_build_ics_keeps_russian_text():
-    events = calendar_export.extract_events(["Родительское собрание 15 октября в 18:00"])
+    events = calendar_export.extract_events(["Родительское собрание 20 декабря в 18:00"])
 
     ics_text = calendar_export.build_ics(events)
 
@@ -461,3 +461,85 @@ def test_medical_input_has_no_repeats():
     out = mask_medical_details("у нас простуда, температура 39 второй день")
     assert out.count("по болезни") == 1, out
     assert "39" not in out, out
+
+
+def test_digest_gets_events_lost_by_llm():
+    """Событие, которое ИИ потерял, дописываем в сводку сами."""
+    from datetime import date
+
+    from app.services.digest import _add_missing_events
+
+    text = ("❓ Вопросы к учителю\n"
+            "• Что принести к пятнице? (С. М.)\n\n"
+            "💰 Договорённости и сборы — пусто")
+    events = [{"title": "Родительское собрание",
+               "date": date(2026, 11, 14), "time": "18:30"}]
+
+    out = _add_missing_events(text, events)
+
+    assert "собрание" in out.lower(), out
+    assert "14.11" in out and "18:30" in out
+    assert "— пусто" not in out
+
+
+def test_digest_does_not_duplicate_events():
+    """Если событие в сводке уже есть — второй раз не добавляем."""
+    from datetime import date
+
+    from app.services.digest import _add_missing_events
+
+    text = "💰 Договорённости и сборы\n• Родительское собрание 14 ноября в 18:30"
+    events = [{"title": "Родительское собрание",
+               "date": date(2026, 11, 14), "time": "18:30"}]
+
+    assert _add_missing_events(text, events) == text
+
+
+async def test_make_digest_keeps_event_from_llm_loss(tmp_path, monkeypatch):
+    """Даже если модель выбросила событие, сводка его покажет."""
+    from app.db.database import Database
+    from app.services import digest, llm_gigachat
+
+    db = Database(str(tmp_path / "d.db"))
+    await db.init()
+    await db.link_chat(-100, 42, "3А класс")
+    await db.add_message(-100, "[USR_1 | М. И.]",
+                         "Родительское собрание 14 ноября в 18:30", masked=1)
+
+    async def fake_summarize(messages):
+        return llm_gigachat.SummarizeResult(
+            text="❓ Вопросы к учителю\n• Что принести?", engine="gigachat"
+        )
+
+    monkeypatch.setattr(llm_gigachat, "summarize", fake_summarize)
+    result = await digest.make_digest(db, -100)
+    await db.close()
+
+    assert "собрание" in result.text.lower(), result.text
+    assert "14.11" in result.text
+
+
+def test_ics_skips_past_events():
+    """Прошедшие события в календарь учителя не попадают."""
+    import datetime
+
+    from app.services.calendar_export import build_ics
+
+    today = datetime.date.today()
+    ics = build_ics([
+        {"title": "Прошлое собрание",
+         "date": today - datetime.timedelta(days=40), "time": "18:00"},
+        {"title": "Будущая экскурсия",
+         "date": today + datetime.timedelta(days=5), "time": None},
+    ])
+    assert "Прошлое собрание" not in ics
+    assert "Будущая экскурсия" in ics
+
+
+def test_medical_dangling_conjunction_removed():
+    """После замены не должно оставаться «по болезни и»."""
+    from app.services.llm_gigachat import sanitize_medical
+
+    out = sanitize_medical("заболел, температура 39, и остался дома")
+    assert "по болезни и остался" not in out, out
+    assert "по болезни" in out

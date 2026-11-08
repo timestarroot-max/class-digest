@@ -63,6 +63,47 @@ class DigestResult:
     calendar_events: list = field(default_factory=list)
 
 
+def _event_key(event: dict) -> str:
+    """Первое значимое слово события — по нему ищем его в сводке."""
+    words = re.findall(r"[А-Яа-яЁё]{4,}", event.get("title", ""))
+    return words[0].lower() if words else ""
+
+
+def _event_line(event: dict) -> str:
+    """«Родительское собрание — 14.11 в 18:30»."""
+    line = event.get("title") or "Событие"
+    date = event.get("date")
+    if date is not None:
+        line += f" — {date.strftime('%d.%m')}"
+    if event.get("time"):
+        line += f" в {event['time']}"
+    return line
+
+
+def _add_missing_events(text: str, events: list[dict]) -> str:
+    """ИИ иногда теряет события — дописываем то, что нашёл экстрактор дат."""
+    low = text.lower()
+    missed = [event for event in events
+              if _event_key(event) and _event_key(event) not in low]
+    if not missed:
+        return text
+
+    bullets = [f"• {_event_line(event)}" for event in missed]
+    lines = text.split("\n")
+    money = next((i for i, line in enumerate(lines)
+                  if line.startswith("💰")), None)
+    if money is None:
+        return (text.rstrip() + "\n\n💰 Договорённости и сборы\n"
+                + "\n".join(bullets))
+
+    insert_at = money + 1
+    while insert_at < len(lines) and lines[insert_at].startswith("•"):
+        insert_at += 1
+    if "— пусто" in lines[money]:
+        lines[money] = lines[money].split("— пусто")[0].strip()
+    return "\n".join(lines[:insert_at] + bullets + lines[insert_at:])
+
+
 async def make_digest(db: Database, chat_id: int) -> DigestResult:
     """Сводка по буферу чата: пустой буфер — сводки нет (engine = 'none')."""
 
@@ -97,9 +138,16 @@ async def make_digest(db: Database, chat_id: int) -> DigestResult:
         logger.exception("Ошибка при summarization чата %s: %s", chat_id, exc)
         summary = await llm_gigachat.fallback_summarize(messages)
 
+    # События берём из сообщений, а не из текста сводки: ИИ может потерять
+    # дату или выбросить пункт целиком — тогда допишем его сами.
+    calendar_events = calendar_export.extract_events(
+        [m.get("text", "") for m in messages]
+    )
+
     # В GigaChat ушли только маркеры — возвращаем учителю полные имена.
     teacher_text = anonymizer.restore_names(summary.text, restore_map)
     teacher_text = prettify_digest(teacher_text)
+    teacher_text = _add_missing_events(teacher_text, calendar_events)
 
     header = f"📋 Классный дайджест — «{title}»"
     footer = (
@@ -108,11 +156,6 @@ async def make_digest(db: Database, chat_id: int) -> DigestResult:
     )
     full_text = f"{header}\n\n{teacher_text.strip()}\n\n{footer}"
 
-    # События берём из сообщений, а не из текста сводки: ИИ может пересказать
-    # дату иначе. Буфер сейчас будет очищен, поэтому события сохраняем в базу.
-    calendar_events = calendar_export.extract_events(
-        [m.get("text", "") for m in messages]
-    )
     await db.save_events(chat_id, calendar_events)
 
     await db.save_digest(chat_id, teacher_text, summary.engine)

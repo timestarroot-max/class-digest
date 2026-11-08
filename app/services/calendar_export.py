@@ -226,7 +226,11 @@ def build_ics(events: list[dict], calendar_name: str = "Классный дай�
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     for number, event in enumerate(events, start=1):
-        date = event.get("date") or today
+        date = event.get("date")
+        if date is not None and date < today:
+            # Прошедшие события в календаре учителя только мешают.
+            continue
+        date = date or today
         hour, minute = _parse_time(event.get("time"))
         item = Event(
             name=str(event.get("title") or "Событие"),

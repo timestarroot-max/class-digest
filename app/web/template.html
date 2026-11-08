@@ -739,8 +739,17 @@
   /* ---------- Сводка ---------- */
   function collectDigest(btn, target){
     busy(btn, true);
+    /* Прошлую сводку убираем сразу: иначе пустой буфер показывал бы старое как свежее. */
+    target.innerHTML = "";
+    target.classList.add("hidden");
     api("/api/digest", {method:"POST"}).then(function(d){
-      if(!d.text){ toast("В буфере пока нет сообщений — загрузите демо-чат"); return; }
+      if(!d.text){
+        target.innerHTML = '<div class="empty">Пока в буфере нет сообщений — ' +
+          "добавьте бота в чат класса или загрузите демо-чат.</div>";
+        target.classList.remove("hidden");
+        toast("Буфер пуст");
+        return;
+      }
       renderDigest(target, d);
       toast("Сводка готова ✓");
       refreshStats();
@@ -823,8 +832,8 @@
           chip("СНИЛС", s.snils) + chip("паспорта", s.passports) +
           chip("почта", s.emails) + chip("имена", s.names) +
         "</div>" +
-        '<p style="color:var(--muted); font-size:13.5px;">Диагнозы в тексте не маскируются, ' +
-        "но в готовую сводку они не попадают: учитель видит «отсутствует по болезни».</p>";
+        '<p style="color:var(--muted); font-size:13.5px;">Диагнозы и измерения тоже заменяются — ' +
+        "в сводке и в модели учитель видит нейтральное «по болезни».</p>";
     }).catch(function(e){ toast("Ошибка: " + e.message); })
       .finally(function(){ busy(b, false); });
   });

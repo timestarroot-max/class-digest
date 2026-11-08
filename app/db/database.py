@@ -543,25 +543,40 @@ class Database:
     # События для календаря (.ics)
 
     async def save_events(self, chat_id: int, events: list) -> None:
-        """Буфер после сводки чистят, а календарь нужен и потом. Старые события чата заменяем новыми."""
+        """Календарь чата копим: новая сводка не должна стирать прошлые события."""
         async with aiosqlite.connect(self.path) as conn:
             cur = await conn.cursor()
             await cur.execute(
-                "DELETE FROM calendar_events WHERE chat_id = ?", (chat_id,)
+                "SELECT title, date, time FROM calendar_events WHERE chat_id = ?",
+                (chat_id,),
             )
+            known = {
+                (str(title), str(date_raw or ""), str(time_raw or ""))
+                for title, date_raw, time_raw in await cur.fetchall()
+            }
             for event in events:
                 date_value = event.get("date")
+                key = (
+                    str(event.get("title") or "Событие"),
+                    str(date_value) if date_value else "",
+                    str(event.get("time") or ""),
+                )
+                if key in known:
+                    continue
+                known.add(key)
                 await cur.execute(
                     """INSERT INTO calendar_events
                            (chat_id, title, date, time)
                        VALUES (?, ?, ?, ?)""",
-                    (
-                        chat_id,
-                        str(event.get("title") or "Событие"),
-                        str(date_value) if date_value else None,
-                        event.get("time"),
-                    ),
+                    (chat_id, key[0], key[1] or None, key[2] or None),
                 )
+            # Совсем старые события (месяц назад и раньше) в календаре не нужны.
+            await cur.execute(
+                """DELETE FROM calendar_events
+                   WHERE chat_id = ? AND date IS NOT NULL
+                     AND date < date('now', '-30 days')""",
+                (chat_id,),
+            )
             await conn.commit()
             await cur.close()
 

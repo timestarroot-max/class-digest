@@ -241,6 +241,23 @@ async def _drop_admin_hint(chat_id: int) -> bool:
     return True
 
 
+async def _drop_hint_later(chat_id: int, delay: int) -> None:
+    await asyncio.sleep(delay)
+    try:
+        await _drop_admin_hint(chat_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Не удалось убрать подсказку в чате %s", chat_id)
+
+
+def _retry_drop_hint(chat_id: int, delay: int = 60) -> None:
+    """MAX выдаёт права не мгновенно — пробуем убрать подсказку ещё раз позже."""
+    if _bot is None:
+        return
+    task = asyncio.create_task(_drop_hint_later(chat_id, delay))
+    _pending_deletions.add(task)
+    task.add_done_callback(_pending_deletions.discard)
+
+
 def _ready() -> bool:
     return _bot is not None and _db is not None
 
@@ -536,6 +553,9 @@ async def on_admin_permissions_changed(event: dict) -> None:
 
             # Право удаления в событии не приходит — проверяем делом.
             hint_removed = await _drop_admin_hint(chat_id)
+            if not hint_removed:
+                # MAX выдаёт права не сразу — вернёмся к подсказке через минуту.
+                _retry_drop_hint(chat_id)
 
             # Короткое подтверждение в чат и подробности — в ЛС.
             try:
@@ -807,7 +827,9 @@ async def on_callback(event: MessageCallback,
 
         elif payload == "menu:help":
             await event.answer()
-            await _send_to_callback_user(event, HELP_TEXT)
+            await _send_to_callback_user(
+                event, HELP_TEXT, main_menu(await _panel_url(user_id))
+            )
 
         elif payload == "menu:demo":
             await event.answer()

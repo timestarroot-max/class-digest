@@ -132,10 +132,17 @@ def mask_medical_details(text: str) -> str:
     return " ".join(_collapse_illness(clean).split())
 
 
+# «по болезни и.» — висячие союзы после замены убираем.
+_ILLNESS_DANGLING_RE = re.compile(
+    r"по болезни[\s,]+(?:и|а|но|или|да)\b[\s,]*", re.IGNORECASE
+)
+
+
 def _collapse_illness(text: str) -> str:
     """«по болезни, высокая по болезни» -> «по болезни»."""
     clean = _ILLNESS_ADJ_BEFORE_RE.sub("", text)
     clean = _ILLNESS_ADJ_AFTER_RE.sub("по болезни", clean)
+    clean = _ILLNESS_DANGLING_RE.sub("по болезни ", clean)
     clean = _ILLNESS_REPEAT_RE.sub("по болезни", clean)
     clean = _ILLNESS_GAP_REPEAT_RE.sub("по болезни\\1", clean)
     # Повторы могут идти цепочкой — схлопываем, пока есть что схлопывать.

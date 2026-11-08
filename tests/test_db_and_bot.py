@@ -792,3 +792,24 @@ async def test_admin_event_keeps_hint_without_delete_right(tmp_path, monkeypatch
     assert await db.get_admin_hint_mid(510) == "mid.hint", "подсказку не тронули"
     assert await db.get_bot_delete_right(510) is False
     assert "удалил" not in bot.sent[0]["text"], bot.sent[0]["text"]
+
+
+async def test_calendar_keeps_old_events(tmp_path):
+    """Новая сводка не должна стирать события прошлой."""
+    import datetime
+
+    db = await _make_db(tmp_path)
+    await db.link_chat(800, 42, "3А класс")
+    await db.save_events(800, [{"title": "Родительское собрание",
+                               "date": datetime.date(2026, 11, 14), "time": "18:30"}])
+    await db.save_events(800, [{"title": "Экскурсия",
+                               "date": datetime.date(2026, 11, 20), "time": None}])
+
+    titles = [e["title"] for e in await db.get_events(800)]
+    assert "Родительское собрание" in titles, "событие прошлой сводки потерялось"
+    assert "Экскурсия" in titles
+
+    # повторная запись того же события не дублируется
+    await db.save_events(800, [{"title": "Экскурсия",
+                               "date": datetime.date(2026, 11, 20), "time": None}])
+    assert len(await db.get_events(800)) == 2
