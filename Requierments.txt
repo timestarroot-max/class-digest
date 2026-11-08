@@ -1,0 +1,20 @@
+# Зависимости проекта «Классный дайджест».
+# Файл Requierments.txt — его точная копия (так требует п. 9.7 Правил хакатона).
+aiohttp==3.14.5
+aiosqlite==0.22.1
+APScheduler==3.11.3
+fastapi==0.162.0
+gigachat==0.2.3
+httpx==0.28.1
+ics==0.7.3
+Jinja2==3.1.6
+maxapi==1.2.3
+natasha==1.6.0
+pydantic==2.14.1
+pymorphy2==0.9.1
+pymorphy2-dicts-ru==2.4.417127.4579844
+pytest==9.1.1
+pytest-asyncio==1.4.0
+python-dotenv==1.2.4
+setuptools==80.10.2
+uvicorn==0.54.0

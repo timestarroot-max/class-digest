@@ -1,0 +1,11 @@
+# Один контейнер: бот и веб-панель на порту 8000, запуск — docker compose up --build -d
+services:
+  class-digest-bot:
+    build: .
+    container_name: class-digest-bot
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/bot/data
+    restart: unless-stopped

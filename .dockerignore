@@ -1,0 +1,17 @@
+# В Docker-образ попадает только код: секреты и база остаются снаружи.
+.env
+data/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+.git/
+.gitignore
+docker-compose.yml
+Dockerfile
+README.md
+CONTRACTS.md
+docs/
+tests/
+pytest.ini
