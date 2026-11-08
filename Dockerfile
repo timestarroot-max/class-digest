@@ -1,6 +1,9 @@
 # Образ бота «Классный дайджест» — один контейнер: бот + веб-панель.
 FROM python:3.11-slim
 
+# Привязка образа к репозиторию: пакет виден на странице проекта в GHCR.
+LABEL org.opencontainers.image.source="https://github.com/timestarroot-max/class-digest"
+
 WORKDIR /bot
 
 ENV PYTHONUNBUFFERED=1 \

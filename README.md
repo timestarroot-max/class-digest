@@ -176,6 +176,14 @@ docker run -d --name class-digest-bot --env-file .env -p 8000:8000 \
 docker compose up --build -d
 ```
 
+Готовый образ опубликован в GitHub Container Registry — собирать самим не обязательно:
+
+```bash
+docker pull ghcr.io/timestarroot-max/class-digest:latest
+docker run -d --name class-digest-bot --env-file .env -p 8000:8000 \
+    -v $(pwd)/data:/bot/data ghcr.io/timestarroot-max/class-digest:latest
+```
+
 Веб-панель откроется на **http://localhost:8000**.
 
 **Без токенов бот всё равно не падает:**
