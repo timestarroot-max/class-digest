@@ -543,3 +543,56 @@ def test_medical_dangling_conjunction_removed():
     out = sanitize_medical("заболел, температура 39, и остался дома")
     assert "по болезни и остался" not in out, out
     assert "по болезни" in out
+
+
+def test_digest_not_empty_when_llm_lost_message():
+    """Короткое сообщение не должно превращаться в «— пусто»."""
+    from app.services.digest import _ensure_not_empty
+
+    messages = [{"text": "завтра контрольная по математике, повторите таблицу умножения",
+                 "sender": "[USR_1 | О. Ш.]"}]
+    out = _ensure_not_empty(
+        "❓ Вопросы к учителю — пусто\n⚡ Требует действия учителя — пусто",
+        messages,
+    )
+
+    assert "контрольная" in out, out
+    assert out.count("•") == 1
+    assert "О. Ш." in out
+    assert "— пусто" in out
+
+
+def test_empty_marker_not_glued_to_bullet():
+    """«— пусто» не должно приклеиваться к пункту."""
+    from app.services.digest import _fix_empty_markers
+
+    text = "💰 Договорённости и сборы\n• Родительское собрание — 14.11 в 18:30 — пусто"
+    out = _fix_empty_markers(text)
+
+    assert "— пусто" not in out
+    assert "Родительское собрание — 14.11 в 18:30" in out
+
+
+async def test_make_digest_keeps_short_message(tmp_path, monkeypatch):
+    """Даже если модель вернула пустоту, сообщение попадёт в сводку."""
+    from app.db.database import Database
+    from app.services import digest, llm_gigachat
+
+    db = Database(str(tmp_path / "d.db"))
+    await db.init()
+    await db.link_chat(-101, 42, "3А класс")
+    await db.add_message(-101, "[USR_1 | О. Ш.]",
+                         "завтра контрольная по математике, повторите таблицу умножения",
+                         masked=1)
+
+    async def fake_summarize(messages):
+        return llm_gigachat.SummarizeResult(
+            text="❓ Вопросы к учителю — пусто\n💰 Договорённости и сборы — пусто",
+            engine="gigachat",
+        )
+
+    monkeypatch.setattr(llm_gigachat, "summarize", fake_summarize)
+    result = await digest.make_digest(db, -101)
+    await db.close()
+
+    assert "контрольная" in result.text.lower(), result.text

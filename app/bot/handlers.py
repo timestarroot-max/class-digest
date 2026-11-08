@@ -1,6 +1,7 @@
 """Обработчики бота: команды, кнопки и тихий сбор сообщений чата."""
 
 import asyncio
+import datetime
 import logging
 import re
 from pathlib import Path
@@ -429,6 +430,13 @@ def _events_word(count: int) -> str:
     return "событий"
 
 
+def _upcoming_events(events: list[dict]) -> list[dict]:
+    """В календарь уходит только то, что ещё впереди: иначе счётчик не совпадёт с файлом."""
+    today = datetime.date.today()
+    return [e for e in events
+            if e.get("date") is None or e.get("date") >= today]
+
+
 async def _send_calendar_to_user(user_id: int) -> None:
     """События берём из базы, а не из текста сводки: модель может переврать даты."""
     events: list[dict] = []
@@ -448,6 +456,7 @@ async def _send_calendar_to_user(user_id: int) -> None:
         seen.add(key)
         unique.append(event)
     events = unique
+    events = _upcoming_events(events)
 
     if not events:
         await _bot.send_message(

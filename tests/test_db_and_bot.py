@@ -813,3 +813,20 @@ async def test_calendar_keeps_old_events(tmp_path):
     await db.save_events(800, [{"title": "Экскурсия",
                                "date": datetime.date(2026, 11, 20), "time": None}])
     assert len(await db.get_events(800)) == 2
+
+
+async def test_calendar_counter_matches_file():
+    """В счётчике календаря — только будущие события, как в файле."""
+    import datetime
+
+    from app.bot import handlers
+
+    today = datetime.date.today()
+    events = [
+        {"title": "Прошлое", "date": today - datetime.timedelta(days=3), "time": None},
+        {"title": "Будущее", "date": today + datetime.timedelta(days=3), "time": None},
+    ]
+
+    upcoming = handlers._upcoming_events(events)
+
+    assert [e["title"] for e in upcoming] == ["Будущее"]

@@ -104,6 +104,58 @@ def _add_missing_events(text: str, events: list[dict]) -> str:
     return "\n".join(lines[:insert_at] + bullets + lines[insert_at:])
 
 
+def _category_mark(text: str) -> str:
+    """Куда отнести сообщение, если модель его потеряла."""
+    low = text.lower()
+    for hints, category in (
+        (llm_gigachat.QUESTION_HINTS, llm_gigachat.CATEGORY_QUESTIONS),
+        (llm_gigachat.ABSENCE_HINTS, llm_gigachat.CATEGORY_ABSENCE),
+        (llm_gigachat.MONEY_HINTS, llm_gigachat.CATEGORY_MONEY),
+    ):
+        if any(hint in low for hint in hints):
+            return category
+    return llm_gigachat.CATEGORY_ACTIONS
+
+
+def _ensure_not_empty(text: str, messages: list[dict]) -> str:
+    """Модель может свернуть короткое сообщение в пустоту — тогда собираем сводку сами."""
+    if any(line.strip().startswith("•") for line in text.split("\n")):
+        return text
+
+    buckets: dict[str, list[str]] = {}
+    for message in messages:
+        body = " ".join(str(message.get("text") or "").split())
+        if not body:
+            continue
+        short = body if len(body) <= 160 else body[:159] + "…"
+        sender = str(message.get("sender") or "").strip()
+        line = f"{short} ({sender})" if sender else short
+        buckets.setdefault(_category_mark(body), []).append(line)
+
+    if not buckets:
+        return text
+
+    order = (llm_gigachat.CATEGORY_QUESTIONS, llm_gigachat.CATEGORY_ABSENCE,
+             llm_gigachat.CATEGORY_MONEY, llm_gigachat.CATEGORY_ACTIONS)
+    lines: list[str] = []
+    for category in order:
+        items = buckets.get(category) or []
+        lines.append(category if items else f"{category} — пусто")
+        lines += [f"• {item}" for item in items]
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _fix_empty_markers(text: str) -> str:
+    """Маркер пустой категории не должен липнуть к пункту: «• ... — пусто»."""
+    fixed: list[str] = []
+    for line in text.split("\n"):
+        if line.strip().startswith("•") and "— пусто" in line:
+            line = line.split("— пусто")[0].rstrip()
+        fixed.append(line)
+    return "\n".join(fixed)
+
+
 async def make_digest(db: Database, chat_id: int) -> DigestResult:
     """Сводка по буферу чата: пустой буфер — сводки нет (engine = 'none')."""
 
@@ -144,10 +196,13 @@ async def make_digest(db: Database, chat_id: int) -> DigestResult:
         [m.get("text", "") for m in messages]
     )
 
+    # Если модель свернула короткое сообщение в пустоту — собираем сводку сами.
+    teacher_text = _ensure_not_empty(summary.text, messages)
     # В GigaChat ушли только маркеры — возвращаем учителю полные имена.
-    teacher_text = anonymizer.restore_names(summary.text, restore_map)
+    teacher_text = anonymizer.restore_names(teacher_text, restore_map)
     teacher_text = prettify_digest(teacher_text)
     teacher_text = _add_missing_events(teacher_text, calendar_events)
+    teacher_text = _fix_empty_markers(teacher_text)
 
     header = f"📋 Классный дайджест — «{title}»"
     footer = (
